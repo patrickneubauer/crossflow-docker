@@ -1,0 +1,271 @@
+##########################################################################
+# CROSSFLOW DOCKER-COMPOSE SETUP SPECIFICATION
+#
+# Apache Hadoop 2.7.4 (uhopper/hadoop):
+# - namenode
+# - resourcemanager
+# - nodemanager1
+# - datanode1-3
+# Source: https://bitbucket.org/uhopper/hadoop-docker/src
+#
+# Apache Hive 2.3.2 (bde2020/docker-hive):
+# - hive-server
+# - hive-metastore
+# - hive-metastore-postgresql
+# Source: https://github.com/big-data-europe/docker-hive
+#
+# Apache Flink 1.5.3-hadoop2.8 (bde2020/docker-flink):
+# - flink-master
+# - flink-slave1-3
+# Source: https://github.com/big-data-europe/docker-flink
+#
+##########################################################################
+
+version: "3.5"
+
+networks:
+  crossflow:
+    name: crossflow
+    driver: bridge
+
+services:
+  ##########################################################################
+  # APACHE HADOOP (namenode, resourcemanager, nodemanager1, datanode1-3)
+  hadoop-namenode:
+    image: uhopper/hadoop-namenode
+    hostname: hadoop-namenode
+    container_name: hadoop-namenode
+    domainname: crossflow
+    networks:
+      - crossflow
+    ports:
+      - "50070:50070"
+      - "8020:8020"
+    volumes:
+      - ./data/namenode:/hadoop/dfs/name
+    environment:
+      - CLUSTER_NAME=crossflow
+    env_file:
+      - ./crossflow.env
+
+  hadoop-resourcemanager:
+    image: uhopper/hadoop-resourcemanager
+    hostname: hadoop-resourcemanager
+    container_name: hadoop-resourcemanager
+    domainname: crossflow
+    networks:
+      - crossflow
+    ports:
+      - "8088:8088"
+      - "8030:8030"
+      - "8031:8031"
+      - "8032:8032"
+    depends_on:
+      - hadoop-namenode
+      - hadoop-datanode1
+      - hadoop-datanode2
+      - hadoop-datanode3
+    env_file:
+      - ./crossflow.env
+
+  hadoop-nodemanager1:
+    image: uhopper/hadoop-nodemanager
+    hostname: hadoop-nodemanager1
+    container_name: hadoop-nodemanager1
+    domainname: crossflow
+    networks:
+      - crossflow
+    depends_on:
+      - hadoop-namenode
+      - hadoop-datanode1
+      - hadoop-datanode2
+      - hadoop-datanode3
+    env_file:
+      - ./crossflow.env
+
+  hadoop-datanode1:
+    image: uhopper/hadoop-datanode
+    hostname: hadoop-datanode1
+    container_name: hadoop-datanode1
+    domainname: crossflow
+    networks:
+      - crossflow
+    ports:
+      - "50010"
+      - "50075"
+      - "50020"
+    depends_on:
+      - hadoop-namenode
+    volumes:
+      - ./data/datanode1:/hadoop/dfs/data
+    env_file:
+      - ./crossflow.env
+
+  hadoop-datanode2:
+    image: uhopper/hadoop-datanode
+    hostname: hadoop-datanode2
+    container_name: hadoop-datanode2
+    domainname: crossflow
+    networks:
+      - crossflow
+    ports:
+      - "50010"
+      - "50075"
+      - "50020"
+    depends_on:
+      - hadoop-namenode
+    volumes:
+      - ./data/datanode2:/hadoop/dfs/data
+    env_file:
+      - ./crossflow.env
+
+  hadoop-datanode3:
+    image: uhopper/hadoop-datanode
+    hostname: hadoop-datanode3
+    container_name: hadoop-datanode3
+    domainname: crossflow
+    networks:
+      - crossflow
+    ports:
+      - "50010"
+      - "50075"
+      - "50020"
+    depends_on:
+      - hadoop-namenode
+    volumes:
+      - ./data/datanode3:/hadoop/dfs/data
+    env_file:
+      - ./crossflow.env
+
+  ##########################################################################
+  # APACHE HIVE (hive-server, hive-metastore, hive-metastore-postgresql)
+  hive-server:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    hostname: hive-server
+    container_name: hive-server
+    domainname: crossflow
+    networks:
+      - crossflow
+    env_file:
+      - ./crossflow.env
+    environment:
+      HIVE_CORE_CONF_javax_jdo_option_ConnectionURL: "jdbc:postgresql://hive-metastore.crossflow/metastore"
+      SERVICE_PRECONDITION: "hive-metastore.crossflow:9083"
+    ports:
+      - "10000:10000"
+
+  hive-metastore:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    hostname: hive-metastore
+    container_name: hive-metastore
+    domainname: crossflow
+    networks:
+      - crossflow
+    depends_on:
+      - hadoop-namenode
+      - hadoop-datanode1
+      - hadoop-datanode2
+      - hadoop-datanode3
+      - hive-metastore-postgresql
+    env_file:
+      - ./crossflow.env
+    command: /opt/hive/bin/hive --service metastore
+    environment:
+      SERVICE_PRECONDITION: "hadoop-namenode.crossflow:50070 hadoop-datanode1.crossflow:50075 hadoop-datanode2.crossflow:50075 hadoop-datanode3.crossflow:50075 hive-metastore-postgresql.crossflow:5432"
+    ports:
+      - "9083:9083"
+
+  hive-metastore-postgresql:
+    image: bde2020/hive-metastore-postgresql:2.3.0
+    hostname: hive-metastore-postgresql
+    container_name: hive-metastore-postgresql
+    domainname: crossflow
+    ports:
+      - "5432:5432"
+    networks:
+      - crossflow
+
+  ##########################################################################
+  # APACHE FLINK (flink-master, flink-worker1-3)
+  flink-master:
+     image: bde2020/flink-master:1.5.3-hadoop2.8
+     hostname: flink-master
+     container_name: flink-master
+     domainname: crossflow
+     networks:
+       - crossflow
+     environment:
+        - INIT_DAEMON_STEP=setup_flink
+  #     - "constraint:node==<yourmasternode>"
+     ports:
+       - "8080:8080"
+       - "8081:8081"
+
+  flink-worker1:
+   image: bde2020/flink-worker:1.5.3-hadoop2.8
+   hostname: flink-worker1
+   container_name: flink-worker1
+   domainname: crossflow
+   networks:
+     - crossflow
+   environment:
+     - FLINK_MASTER_PORT_6123_TCP_ADDR=flink-master.crossflow
+  #    - FLINK_NUM_TASK_SLOTS=2
+  #    - "constraint:node==<yourworkernode>"
+   depends_on:
+      - "flink-master"
+
+  flink-worker2:
+   image: bde2020/flink-worker:1.5.3-hadoop2.8
+   hostname: flink-worker2
+   container_name: flink-worker2
+   domainname: crossflow
+   networks:
+     - crossflow
+   environment:
+     - FLINK_MASTER_PORT_6123_TCP_ADDR=flink-master.crossflow
+  #    - FLINK_NUM_TASK_SLOTS=2
+  #    - "constraint:node==<yourworkernode>"
+   depends_on:
+      - "flink-master"
+
+  flink-worker3:
+   image: bde2020/flink-worker:1.5.3-hadoop2.8
+   hostname: flink-worker3
+   container_name: flink-worker3
+   domainname: crossflow
+   networks:
+     - crossflow
+   environment:
+     - FLINK_MASTER_PORT_6123_TCP_ADDR=flink-master.crossflow
+  #    - FLINK_NUM_TASK_SLOTS=2
+  #    - "constraint:node==<yourworkernode>"
+   depends_on:
+      - "flink-master"
+
+  ##########################################################################
+  # APACHE KAFKA (zookeeper, kafka)
+  zookeeper:
+   image: bitnami/zookeeper:latest
+   hostname: zookeeper
+   container_name: zookeeper
+   ports:
+     - "2181:2181"
+   domainname: crossflow
+   networks:
+     - crossflow
+   environment:
+     - ALLOW_ANONYMOUS_LOGIN=yes
+  kafka:
+   image: 'bitnami/kafka:latest'
+   hostname: kafka
+   container_name: kafka
+   domainname: crossflow
+   networks:
+     - crossflow
+   ports:
+     - "9092:9092"
+   environment:
+     - KAFKA_ZOOKEEPER_CONNECT=zookeeper.crossflow:2181
+     - ALLOW_PLAINTEXT_LISTENER=yes
+  ##########################################################################
